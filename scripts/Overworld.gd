@@ -25,6 +25,7 @@ var noise := FastNoiseLite.new()
 
 var current_tile := Vector2i()
 var target_tile := Vector2i()
+var character_marker: Sprite2D
 
 func _ready() -> void:
     rng.randomize()
@@ -35,6 +36,7 @@ func _ready() -> void:
     current_tile = Vector2i(MAP_SIZE.x / 2, MAP_SIZE.y / 2)
     target_tile = current_tile
     _snap_player_to_tile(current_tile)
+    _create_character_marker()
     _configure_camera_limits()
 
 func _process(_delta: float) -> void:
@@ -78,6 +80,7 @@ func _snap_player_to_tile(tile: Vector2i) -> void:
     var world_pos := _tile_to_world(tile)
     player.global_position = world_pos
     current_tile = tile
+    _update_character_marker(tile)
 
 func _tile_to_world(tile: Vector2i) -> Vector2:
     var local := tile_map.map_to_local(tile)
@@ -123,7 +126,7 @@ func _generate_map() -> void:
         for y in range(MAP_SIZE.y):
             var terrain_type := _pick_terrain_for_tile(x, y)
             terrain_grid[x][y] = terrain_type
-            tile_map.set_cell(0, Vector2i(x, y), tile_sources[terrain_type])
+            tile_map.set_cell(0, Vector2i(x, y), tile_sources[terrain_type], Vector2i.ZERO)
 
 func _pick_terrain_for_tile(x: int, y: int) -> int:
     var height := noise.get_noise_2d(float(x), float(y))
@@ -182,6 +185,41 @@ func _make_tile_texture(terrain_type: int, base_color: Color) -> Texture2D:
             for y in range(CELL_SIZE // 2, CELL_SIZE):
                 for x in range(CELL_SIZE // 2, CELL_SIZE):
                     image.set_pixel(x, y, shadow_color)
+
+    return ImageTexture.create_from_image(image)
+
+func _create_character_marker() -> void:
+    character_marker = Sprite2D.new()
+    character_marker.texture = _make_character_marker_texture()
+    character_marker.centered = true
+    character_marker.z_index = 5
+    add_child(character_marker)
+    _update_character_marker(current_tile)
+
+func _update_character_marker(tile: Vector2i) -> void:
+    if character_marker == null:
+        return
+    var world_pos := _tile_to_world(tile)
+    character_marker.global_position = world_pos
+
+func _make_character_marker_texture() -> Texture2D:
+    var image := Image.create(CELL_SIZE, CELL_SIZE, false, Image.FORMAT_RGBA8)
+    image.fill(Color(0, 0, 0, 0))
+
+    var center := Vector2i(CELL_SIZE // 2, CELL_SIZE // 2)
+    var outer_radius := CELL_SIZE // 2
+    var inner_radius := max(outer_radius - 3, 1)
+    var highlight_color := Color(1.0, 0.95, 0.2, 0.9)
+    var accent_color := Color(1.0, 0.45, 0.0, 0.9)
+
+    for y in range(-outer_radius, outer_radius + 1):
+        for x in range(-outer_radius, outer_radius + 1):
+            var dist_sq := x * x + y * y
+            if dist_sq <= outer_radius * outer_radius and dist_sq >= inner_radius * inner_radius:
+                var pos := center + Vector2i(x, y)
+                if pos.x >= 0 and pos.x < CELL_SIZE and pos.y >= 0 and pos.y < CELL_SIZE:
+                    var tint := highlight_color if dist_sq < (outer_radius - 1) * (outer_radius - 1) else accent_color
+                    image.set_pixelv(pos, tint)
 
     return ImageTexture.create_from_image(image)
 
