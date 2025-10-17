@@ -5,6 +5,12 @@ const CELL_SIZE := 32
 const MOVE_SPEED := 300.0
 
 enum TerrainType { WATER, GRASS, FOREST, MOUNTAIN }
+const TERRAIN_ORDER := [
+    TerrainType.WATER,
+    TerrainType.GRASS,
+    TerrainType.FOREST,
+    TerrainType.MOUNTAIN
+]
 
 const TERRAIN_DEFINITIONS := {
     TerrainType.WATER: {"color": Color(0.1, 0.3, 0.8), "name": "Water"},
@@ -259,7 +265,7 @@ func _create_tileset() -> TileSet:
     tile_set.resource_name = "OverworldTileSet"
     tile_set.tile_size = Vector2i(CELL_SIZE, CELL_SIZE)
 
-    for terrain_type in TERRAIN_DEFINITIONS.keys():
+    for terrain_type in TERRAIN_ORDER:
         var data := TERRAIN_DEFINITIONS[terrain_type]
         var variant_count := TERRAIN_VARIANTS.get(terrain_type, 1)
         for variant_index in range(variant_count):
@@ -275,26 +281,29 @@ func _create_tileset() -> TileSet:
 
 func _cache_tile_sources() -> void:
     tile_sources.clear()
-    for terrain_type in TERRAIN_DEFINITIONS.keys():
+    for terrain_type in TERRAIN_ORDER:
         tile_sources[terrain_type] = []
 
     if generated_tile_set == null:
         return
 
     var source_count := generated_tile_set.get_source_count()
-    for index in range(source_count):
-        var source_id := generated_tile_set.get_source_id(index)
-        var source := generated_tile_set.get_source(source_id)
-        if source is TileSetAtlasSource:
-            var source_name := source.resource_name
-            for terrain_type in TERRAIN_DEFINITIONS.keys():
-                var base_name: String = TERRAIN_DEFINITIONS[terrain_type]["name"]
-                if source_name.begins_with(base_name):
-                    tile_sources[terrain_type].append(source_id)
-                    break
+    var source_index := 0
 
-    for terrain_type in tile_sources.keys():
-        tile_sources[terrain_type].sort()
+    for terrain_type in TERRAIN_ORDER:
+        var variants: Array = []
+        var expected_count := TERRAIN_VARIANTS.get(terrain_type, 1)
+
+        for _i in range(expected_count):
+            if source_index >= source_count:
+                push_warning("Tileset is missing variants for terrain type %s" % TERRAIN_DEFINITIONS[terrain_type]["name"])
+                break
+            var source_id := generated_tile_set.get_source_id(source_index)
+            variants.append(source_id)
+            source_index += 1
+
+        variants.sort()
+        tile_sources[terrain_type] = variants
 
 func _save_tileset_to_disk(tile_set: TileSet) -> void:
 
