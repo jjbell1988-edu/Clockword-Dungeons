@@ -24,6 +24,8 @@ const TILESET_PATH := "res://tilesets/Overworld.tres"
 @onready var player: Node2D = $Player
 @onready var player_sprite: Sprite2D = $Player/Sprite2D
 @onready var camera: Camera2D = $Player/Camera2D
+@onready var start_menu: Control = $CanvasLayer/StartMenu
+@onready var start_button: Button = $CanvasLayer/StartMenu/VBoxContainer/StartButton
 
 var terrain_grid: Array = []
 var tile_sources: Dictionary = {}
@@ -34,6 +36,7 @@ var noise := FastNoiseLite.new()
 var current_tile := Vector2i()
 var target_tile := Vector2i()
 var character_marker: Sprite2D
+var game_started := false
 
 func _ready() -> void:
     rng.randomize()
@@ -46,11 +49,16 @@ func _ready() -> void:
     _snap_player_to_tile(current_tile)
     _create_character_marker()
     _configure_camera_limits()
+    _initialize_start_menu()
 
 func _process(_delta: float) -> void:
+    if not game_started:
+        return
     _handle_keyboard_input()
 
 func _physics_process(delta: float) -> void:
+    if not game_started:
+        return
     var target_position := _tile_to_world(target_tile)
     if player.global_position.distance_to(target_position) < 1.0:
         _snap_player_to_tile(target_tile)
@@ -58,6 +66,8 @@ func _physics_process(delta: float) -> void:
         player.global_position = player.global_position.move_toward(target_position, MOVE_SPEED * delta)
 
 func _unhandled_input(event: InputEvent) -> void:
+    if not game_started:
+        return
     if event is InputEventMouseButton and event.pressed and event.button_index == MouseButton.LEFT:
         var mouse_pos := (event as InputEventMouseButton).position
         var local_pos := tile_map.to_local(mouse_pos)
@@ -66,6 +76,8 @@ func _unhandled_input(event: InputEvent) -> void:
             target_tile = clicked_tile
 
 func _handle_keyboard_input() -> void:
+    if not game_started:
+        return
     var direction := Vector2i.ZERO
     if Input.is_action_just_pressed("ui_left"):
         direction.x = -1
@@ -364,5 +376,20 @@ func _configure_camera_limits() -> void:
     camera.limit_top = 0
     camera.limit_right = MAP_SIZE.x * CELL_SIZE
     camera.limit_bottom = MAP_SIZE.y * CELL_SIZE
+
+func _initialize_start_menu() -> void:
+    if not is_instance_valid(start_menu):
+        game_started = true
+        return
+    start_menu.visible = true
+    start_menu.pause_mode = Node.PAUSE_MODE_PROCESS
+    game_started = false
+    start_button.pressed.connect(_on_start_button_pressed)
+    get_tree().paused = true
+
+func _on_start_button_pressed() -> void:
+    start_menu.visible = false
+    game_started = true
+    get_tree().paused = false
     camera.position = Vector2.ZERO
     camera.zoom = Vector2(1.5, 1.5)
