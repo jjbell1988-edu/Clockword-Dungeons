@@ -6,6 +6,13 @@ const MOVE_SPEED := 300.0
 
 enum TerrainType { WATER, GRASS, FOREST, MOUNTAIN }
 
+const TERRAIN_DEFINITIONS := {
+    TerrainType.WATER: {"color": Color(0.1, 0.3, 0.8), "name": "Water"},
+    TerrainType.GRASS: {"color": Color(0.2, 0.6, 0.2), "name": "Grass"},
+    TerrainType.FOREST: {"color": Color(0.1, 0.45, 0.12), "name": "Forest"},
+    TerrainType.MOUNTAIN: {"color": Color(0.45, 0.42, 0.35), "name": "Mountain"}
+}
+
 @onready var tile_map: TileMap = $TileMap
 @onready var player: Node2D = $Player
 @onready var player_sprite: Sprite2D = $Player/Sprite2D
@@ -93,19 +100,12 @@ func _setup_tilemap() -> void:
     var tile_set := TileSet.new()
     tile_set.tile_size = Vector2i(CELL_SIZE, CELL_SIZE)
 
-    var terrain_definitions := {
-        TerrainType.WATER: {"color": Color(0.1, 0.3, 0.8), "name": "Water"},
-        TerrainType.GRASS: {"color": Color(0.2, 0.6, 0.2), "name": "Grass"},
-        TerrainType.FOREST: {"color": Color(0.1, 0.45, 0.12), "name": "Forest"},
-        TerrainType.MOUNTAIN: {"color": Color(0.45, 0.42, 0.35), "name": "Mountain"}
-    }
-
-    for terrain_type in terrain_definitions.keys():
-        var data := terrain_definitions[terrain_type]
+    for terrain_type in TERRAIN_DEFINITIONS.keys():
+        var data := TERRAIN_DEFINITIONS[terrain_type]
         var atlas_source := TileSetAtlasSource.new()
         atlas_source.resource_name = data["name"]
-        atlas_source.texture = _make_colored_texture(data["color"])
-        atlas_source.texture_region_size = Vector2i(1, 1)
+        atlas_source.texture = _make_tile_texture(terrain_type, data["color"])
+        atlas_source.texture_region_size = Vector2i(CELL_SIZE, CELL_SIZE)
         atlas_source.create_tile(Vector2i.ZERO)
         var source_id := tile_set.get_next_source_id()
         tile_set.add_source(atlas_source, source_id)
@@ -136,14 +136,74 @@ func _pick_terrain_for_tile(x: int, y: int) -> int:
     else:
         return TerrainType.MOUNTAIN
 
-func _make_colored_texture(color: Color) -> Texture2D:
+func _make_tile_texture(terrain_type: int, base_color: Color) -> Texture2D:
     var image := Image.create(CELL_SIZE, CELL_SIZE, false, Image.FORMAT_RGBA8)
-    image.fill(color)
+    image.fill(base_color)
+
+    match terrain_type:
+        TerrainType.WATER:
+            var wave_color := base_color.lightened(0.25)
+            for y in range(4, CELL_SIZE, 6):
+                for x in range(CELL_SIZE):
+                    if (x + y) % 5 < 2:
+                        image.set_pixel(x, y, wave_color)
+        TerrainType.GRASS:
+            var blade_color := base_color.lightened(0.2)
+            for _i in range(CELL_SIZE * 2):
+                var px := rng.randi_range(0, CELL_SIZE - 1)
+                var py := rng.randi_range(0, CELL_SIZE - 1)
+                image.set_pixel(px, py, blade_color)
+        TerrainType.FOREST:
+            var canopy_color := base_color.darkened(0.1)
+            var trunk_color := Color(0.2, 0.15, 0.1)
+            var centers := [
+                Vector2i(CELL_SIZE // 3, CELL_SIZE // 3),
+                Vector2i(CELL_SIZE * 2 // 3, CELL_SIZE * 2 // 3)
+            ]
+            for center in centers:
+                for y_offset in range(-4, 5):
+                    for x_offset in range(-4, 5):
+                        var pos := center + Vector2i(x_offset, y_offset)
+                        if pos.x >= 0 and pos.x < CELL_SIZE and pos.y >= 0 and pos.y < CELL_SIZE:
+                            if x_offset * x_offset + y_offset * y_offset <= 12:
+                                image.set_pixelv(pos, canopy_color)
+                var trunk_pos := Vector2i(center.x, min(center.y + 3, CELL_SIZE - 1))
+                image.set_pixelv(trunk_pos, trunk_color)
+        TerrainType.MOUNTAIN:
+            var ridge_color := base_color.lightened(0.3)
+            var shadow_color := base_color.darkened(0.2)
+            for y in range(CELL_SIZE):
+                var ratio := float(y) / float(CELL_SIZE)
+                var half_width := int(ratio * float(CELL_SIZE) * 0.5)
+                var start_x := clamp((CELL_SIZE // 2) - half_width, 0, CELL_SIZE - 1)
+                var end_x := clamp((CELL_SIZE // 2) + half_width, 0, CELL_SIZE - 1)
+                for x in range(start_x, end_x + 1):
+                    image.set_pixel(x, y, ridge_color)
+            for y in range(CELL_SIZE // 2, CELL_SIZE):
+                for x in range(CELL_SIZE // 2, CELL_SIZE):
+                    image.set_pixel(x, y, shadow_color)
+
     return ImageTexture.create_from_image(image)
 
 func _create_player_visual() -> void:
     var image := Image.create(CELL_SIZE, CELL_SIZE, false, Image.FORMAT_RGBA8)
-    image.fill(Color(0.95, 0.88, 0.2))
+    image.fill(Color(0, 0, 0, 0))
+
+    var center := Vector2i(CELL_SIZE // 2, CELL_SIZE // 2)
+    var radius := CELL_SIZE // 3
+    var body_color := Color(0.95, 0.88, 0.2)
+    var border_color := Color(0.2, 0.2, 0.2, 0.8)
+
+    for y in range(-radius - 1, radius + 2):
+        for x in range(-radius - 1, radius + 2):
+            var pos := center + Vector2i(x, y)
+            if pos.x >= 0 and pos.x < CELL_SIZE and pos.y >= 0 and pos.y < CELL_SIZE:
+                var dist_sq := x * x + y * y
+                if dist_sq <= radius * radius:
+                    image.set_pixelv(pos, body_color)
+                elif dist_sq <= (radius + 1) * (radius + 1):
+                    image.set_pixelv(pos, border_color)
+
     player_sprite.texture = ImageTexture.create_from_image(image)
     player_sprite.centered = true
     player_sprite.scale = Vector2(0.5, 0.5)
@@ -154,3 +214,4 @@ func _configure_camera_limits() -> void:
     camera.limit_right = MAP_SIZE.x * CELL_SIZE
     camera.limit_bottom = MAP_SIZE.y * CELL_SIZE
     camera.position = Vector2.ZERO
+    camera.zoom = Vector2(1.5, 1.5)
