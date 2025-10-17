@@ -12,6 +12,12 @@ const TERRAIN_DEFINITIONS := {
     TerrainType.FOREST: {"color": Color(0.1, 0.45, 0.12), "name": "Forest"},
     TerrainType.MOUNTAIN: {"color": Color(0.45, 0.42, 0.35), "name": "Mountain"}
 }
+const TERRAIN_VARIANTS := {
+    TerrainType.WATER: 4,
+    TerrainType.GRASS: 4,
+    TerrainType.FOREST: 3,
+    TerrainType.MOUNTAIN: 3
+}
 
 @onready var tile_map: TileMap = $TileMap
 @onready var player: Node2D = $Player
@@ -105,14 +111,17 @@ func _setup_tilemap() -> void:
 
     for terrain_type in TERRAIN_DEFINITIONS.keys():
         var data := TERRAIN_DEFINITIONS[terrain_type]
-        var atlas_source := TileSetAtlasSource.new()
-        atlas_source.resource_name = data["name"]
-        atlas_source.texture = _make_tile_texture(terrain_type, data["color"])
-        atlas_source.texture_region_size = Vector2i(CELL_SIZE, CELL_SIZE)
-        atlas_source.create_tile(Vector2i.ZERO)
-        var source_id := tile_set.get_next_source_id()
-        tile_set.add_source(atlas_source, source_id)
-        tile_sources[terrain_type] = source_id
+        tile_sources[terrain_type] = []
+        var variant_count := TERRAIN_VARIANTS.get(terrain_type, 1)
+        for variant_index in range(variant_count):
+            var atlas_source := TileSetAtlasSource.new()
+            atlas_source.resource_name = "%s_%02d" % [data["name"], variant_index + 1]
+            atlas_source.texture = _make_tile_texture(terrain_type, data["color"], variant_index)
+            atlas_source.texture_region_size = Vector2i(CELL_SIZE, CELL_SIZE)
+            atlas_source.create_tile(Vector2i.ZERO)
+            var source_id := tile_set.get_next_source_id()
+            tile_set.add_source(atlas_source, source_id)
+            tile_sources[terrain_type].append(source_id)
 
     tile_map.tile_set = tile_set
 
@@ -126,7 +135,9 @@ func _generate_map() -> void:
         for y in range(MAP_SIZE.y):
             var terrain_type := _pick_terrain_for_tile(x, y)
             terrain_grid[x][y] = terrain_type
-            tile_map.set_cell(0, Vector2i(x, y), tile_sources[terrain_type], Vector2i.ZERO)
+            var variants: Array = tile_sources[terrain_type]
+            var chosen_source := variants[rng.randi_range(0, variants.size() - 1)]
+            tile_map.set_cell(0, Vector2i(x, y), chosen_source, Vector2i.ZERO)
 
 func _pick_terrain_for_tile(x: int, y: int) -> int:
     var height := noise.get_noise_2d(float(x), float(y))
@@ -139,52 +150,88 @@ func _pick_terrain_for_tile(x: int, y: int) -> int:
     else:
         return TerrainType.MOUNTAIN
 
-func _make_tile_texture(terrain_type: int, base_color: Color) -> Texture2D:
+func _make_tile_texture(terrain_type: int, base_color: Color, variant_index: int) -> Texture2D:
     var image := Image.create(CELL_SIZE, CELL_SIZE, false, Image.FORMAT_RGBA8)
     image.fill(base_color)
+    var rng_local := RandomNumberGenerator.new()
+    rng_local.seed = rng.randi()
 
     match terrain_type:
         TerrainType.WATER:
-            var wave_color := base_color.lightened(0.25)
-            for y in range(4, CELL_SIZE, 6):
+            var deep_color := base_color.darkened(0.2)
+            var highlight_color := base_color.lightened(0.35)
+            for y in range(CELL_SIZE):
+                var lerp_factor := float(y) / float(CELL_SIZE - 1)
+                var row_color := deep_color.lerp(base_color, lerp_factor)
                 for x in range(CELL_SIZE):
-                    if (x + y) % 5 < 2:
-                        image.set_pixel(x, y, wave_color)
+                    image.set_pixel(x, y, row_color)
+            var offset := variant_index * 3
+            for y in range(3, CELL_SIZE, 5):
+                for x in range(CELL_SIZE):
+                    if (x + y + offset) % 6 == 0:
+                        image.set_pixel(x, y, highlight_color)
+            for y in range(0, CELL_SIZE, 8):
+                for x in range(0, CELL_SIZE, 8):
+                    image.set_pixel(x, y, highlight_color.darkened(0.2))
         TerrainType.GRASS:
-            var blade_color := base_color.lightened(0.2)
-            for _i in range(CELL_SIZE * 2):
-                var px := rng.randi_range(0, CELL_SIZE - 1)
-                var py := rng.randi_range(0, CELL_SIZE - 1)
-                image.set_pixel(px, py, blade_color)
+            var shadow_color := base_color.darkened(0.15)
+            for y in range(CELL_SIZE):
+                for x in range(CELL_SIZE):
+                    var noise_val := rng_local.randf()
+                    var tint := base_color.lerp(shadow_color, noise_val * 0.35)
+                    image.set_pixel(x, y, tint)
+            var blade_color := base_color.lightened(0.25)
+            var tuft_count := 5 + variant_index * 2
+            for _i in range(tuft_count):
+                var tuft_center := Vector2i(rng_local.randi_range(2, CELL_SIZE - 3), rng_local.randi_range(2, CELL_SIZE - 3))
+                for x_offset in range(-1, 2):
+                    for y_offset in range(0, 3):
+                        var pos := tuft_center + Vector2i(x_offset, -y_offset)
+                        if pos.x >= 0 and pos.x < CELL_SIZE and pos.y >= 0 and pos.y < CELL_SIZE:
+                            image.set_pixelv(pos, blade_color)
+            for x in range(CELL_SIZE):
+                if x % 5 == variant_index:
+                    image.set_pixel(x, CELL_SIZE - 1, shadow_color)
         TerrainType.FOREST:
             var canopy_color := base_color.darkened(0.1)
-            var trunk_color := Color(0.2, 0.15, 0.1)
-            var centers := [
+            var canopy_highlight := base_color.lightened(0.2)
+            var trunk_color := Color(0.25, 0.17, 0.11)
+            var blob_centers := [
                 Vector2i(CELL_SIZE // 3, CELL_SIZE // 3),
-                Vector2i(CELL_SIZE * 2 // 3, CELL_SIZE * 2 // 3)
+                Vector2i(CELL_SIZE // 2 + variant_index, CELL_SIZE * 2 // 3)
             ]
-            for center in centers:
-                for y_offset in range(-4, 5):
-                    for x_offset in range(-4, 5):
+            for center in blob_centers:
+                var radius := 4 + variant_index
+                for y_offset in range(-radius, radius + 1):
+                    for x_offset in range(-radius, radius + 1):
                         var pos := center + Vector2i(x_offset, y_offset)
                         if pos.x >= 0 and pos.x < CELL_SIZE and pos.y >= 0 and pos.y < CELL_SIZE:
-                            if x_offset * x_offset + y_offset * y_offset <= 12:
-                                image.set_pixelv(pos, canopy_color)
-                var trunk_pos := Vector2i(center.x, min(center.y + 3, CELL_SIZE - 1))
-                image.set_pixelv(trunk_pos, trunk_color)
+                            var dist_sq := x_offset * x_offset + y_offset * y_offset
+                            if dist_sq <= radius * radius:
+                                var canopy_tint := canopy_color.lerp(canopy_highlight, clamp(1.0 - float(dist_sq) / float(radius * radius), 0.0, 1.0))
+                                image.set_pixelv(pos, canopy_tint)
+                var trunk_height := clamp(radius // 2, 2, CELL_SIZE - 2)
+                for i in range(trunk_height):
+                    var trunk_pos := Vector2i(center.x, min(center.y + i, CELL_SIZE - 1))
+                    image.set_pixelv(trunk_pos, trunk_color)
         TerrainType.MOUNTAIN:
-            var ridge_color := base_color.lightened(0.3)
-            var shadow_color := base_color.darkened(0.2)
+            var peak_color := base_color.lightened(0.4)
+            var slope_color := base_color.darkened(0.1)
+            var shadow_color := base_color.darkened(0.25)
+            var peak_offset := variant_index - 1
             for y in range(CELL_SIZE):
-                var ratio := float(y) / float(CELL_SIZE)
-                var half_width := int(ratio * float(CELL_SIZE) * 0.5)
-                var start_x := clamp((CELL_SIZE // 2) - half_width, 0, CELL_SIZE - 1)
-                var end_x := clamp((CELL_SIZE // 2) + half_width, 0, CELL_SIZE - 1)
+                var slope_ratio := float(y) / float(CELL_SIZE - 1)
+                var center_x := CELL_SIZE // 2 + peak_offset
+                var half_width := int((1.0 - slope_ratio) * float(CELL_SIZE) * 0.35)
+                var start_x := clamp(center_x - half_width, 0, CELL_SIZE - 1)
+                var end_x := clamp(center_x + half_width, 0, CELL_SIZE - 1)
                 for x in range(start_x, end_x + 1):
-                    image.set_pixel(x, y, ridge_color)
+                    var color_tint := peak_color.lerp(slope_color, slope_ratio)
+                    image.set_pixel(x, y, color_tint)
             for y in range(CELL_SIZE // 2, CELL_SIZE):
-                for x in range(CELL_SIZE // 2, CELL_SIZE):
-                    image.set_pixel(x, y, shadow_color)
+                for x in range(CELL_SIZE // 2 + peak_offset, CELL_SIZE):
+                    var current := image.get_pixel(x, y)
+                    image.set_pixel(x, y, current.lerp(shadow_color, 0.6))
 
     return ImageTexture.create_from_image(image)
 
