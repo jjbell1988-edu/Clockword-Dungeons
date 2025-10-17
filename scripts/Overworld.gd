@@ -18,6 +18,7 @@ const TERRAIN_VARIANTS := {
     TerrainType.FOREST: 3,
     TerrainType.MOUNTAIN: 3
 }
+const TILESET_PATH := "res://tilesets/Overworld.tres"
 
 @onready var tile_map: TileMap = $TileMap
 @onready var player: Node2D = $Player
@@ -107,25 +108,11 @@ func _configure_noise() -> void:
     noise.fractal_gain = 0.5
 
 func _setup_tilemap() -> void:
-    generated_tile_set = TileSet.new()
-    generated_tile_set.tile_size = Vector2i(CELL_SIZE, CELL_SIZE)
-
-    for terrain_type in TERRAIN_DEFINITIONS.keys():
-        var data := TERRAIN_DEFINITIONS[terrain_type]
-        tile_sources[terrain_type] = []
-        var variant_count := TERRAIN_VARIANTS.get(terrain_type, 1)
-        for variant_index in range(variant_count):
-            var atlas_source := TileSetAtlasSource.new()
-            atlas_source.resource_name = "%s_%02d" % [data["name"], variant_index + 1]
-            atlas_source.texture = _make_tile_texture(terrain_type, data["color"], variant_index)
-            atlas_source.texture_region_size = Vector2i(CELL_SIZE, CELL_SIZE)
-            atlas_source.create_tile(Vector2i.ZERO)
-            var source_id := generated_tile_set.get_next_source_id()
-            generated_tile_set.add_source(atlas_source, source_id)
-            tile_sources[terrain_type].append(source_id)
-
+    tile_sources.clear()
+    generated_tile_set = _load_or_create_tileset()
     tile_map.tile_set = generated_tile_set
     tile_map.set_layer_enabled(0, true)
+    _cache_tile_sources()
 
 func _generate_map() -> void:
     tile_map.clear()
@@ -139,6 +126,9 @@ func _generate_map() -> void:
             var terrain_type := _pick_terrain_for_tile(x, y)
             terrain_grid[x][y] = terrain_type
             var variants: Array = tile_sources[terrain_type]
+            if variants.is_empty():
+                push_warning("No tile variants found for terrain type %s" % TERRAIN_DEFINITIONS[terrain_type]["name"])
+                continue
             var chosen_source := variants[rng.randi_range(0, variants.size() - 1)]
             tile_map.set_cell(0, Vector2i(x, y), chosen_source, Vector2i.ZERO)
 
@@ -159,7 +149,8 @@ func _make_tile_texture(terrain_type: int, base_color: Color, variant_index: int
     var image := Image.create(CELL_SIZE, CELL_SIZE, false, Image.FORMAT_RGBA8)
     image.fill(base_color)
     var rng_local := RandomNumberGenerator.new()
-    rng_local.seed = rng.randi()
+    var seed_value := uint64(terrain_type) * 92821 + uint64(variant_index) * 1327 + 421
+    rng_local.seed = seed_value
     image.lock()
 
     match terrain_type:
@@ -241,6 +232,70 @@ func _make_tile_texture(terrain_type: int, base_color: Color, variant_index: int
 
     image.unlock()
     return ImageTexture.create_from_image(image)
+
+func _load_or_create_tileset() -> TileSet:
+    var tileset: TileSet = null
+    if ResourceLoader.exists(TILESET_PATH):
+        tileset = ResourceLoader.load(TILESET_PATH) as TileSet
+    if tileset == null:
+        tileset = _create_tileset()
+        _save_tileset_to_disk(tileset)
+    return tileset
+
+func _create_tileset() -> TileSet:
+    var tile_set := TileSet.new()
+    tile_set.resource_name = "OverworldTileSet"
+    tile_set.tile_size = Vector2i(CELL_SIZE, CELL_SIZE)
+
+    for terrain_type in TERRAIN_DEFINITIONS.keys():
+        var data := TERRAIN_DEFINITIONS[terrain_type]
+        var variant_count := TERRAIN_VARIANTS.get(terrain_type, 1)
+        for variant_index in range(variant_count):
+            var atlas_source := TileSetAtlasSource.new()
+            atlas_source.resource_name = "%s_%02d" % [data["name"], variant_index + 1]
+            atlas_source.texture = _make_tile_texture(terrain_type, data["color"], variant_index)
+            atlas_source.texture_region_size = Vector2i(CELL_SIZE, CELL_SIZE)
+            atlas_source.create_tile(Vector2i.ZERO)
+            var source_id := tile_set.get_next_source_id()
+            tile_set.add_source(atlas_source, source_id)
+
+    return tile_set
+
+func _cache_tile_sources() -> void:
+    tile_sources.clear()
+    for terrain_type in TERRAIN_DEFINITIONS.keys():
+        tile_sources[terrain_type] = []
+
+    if generated_tile_set == null:
+        return
+
+    var source_count := generated_tile_set.get_source_count()
+    for index in range(source_count):
+        var source_id := generated_tile_set.get_source_id(index)
+        var source := generated_tile_set.get_source(source_id)
+        if source is TileSetAtlasSource:
+            var source_name := source.resource_name
+            for terrain_type in TERRAIN_DEFINITIONS.keys():
+                var base_name: String = TERRAIN_DEFINITIONS[terrain_type]["name"]
+                if source_name.begins_with(base_name):
+                    tile_sources[terrain_type].append(source_id)
+                    break
+
+    for terrain_type in tile_sources.keys():
+        tile_sources[terrain_type].sort()
+
+func _save_tileset_to_disk(tile_set: TileSet) -> void:
+
+    var dir_path := "res://tilesets"
+    if not DirAccess.dir_exists_absolute(dir_path):
+        var err := DirAccess.make_dir_recursive_absolute(dir_path)
+        if err != OK:
+            push_warning("Unable to create tileset directory: %s" % error_string(err))
+            return
+
+    var save_err := ResourceSaver.save(tile_set, TILESET_PATH)
+    if save_err != OK:
+        push_warning("Failed to save tileset: %s" % error_string(save_err))
 
 func _create_character_marker() -> void:
     character_marker = Sprite2D.new()
