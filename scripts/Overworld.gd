@@ -26,6 +26,7 @@ const TERRAIN_VARIANTS := {
 
 var terrain_grid: Array = []
 var tile_sources: Dictionary = {}
+var generated_tile_set: TileSet
 var rng := RandomNumberGenerator.new()
 var noise := FastNoiseLite.new()
 
@@ -106,8 +107,8 @@ func _configure_noise() -> void:
     noise.fractal_gain = 0.5
 
 func _setup_tilemap() -> void:
-    var tile_set := TileSet.new()
-    tile_set.tile_size = Vector2i(CELL_SIZE, CELL_SIZE)
+    generated_tile_set = TileSet.new()
+    generated_tile_set.tile_size = Vector2i(CELL_SIZE, CELL_SIZE)
 
     for terrain_type in TERRAIN_DEFINITIONS.keys():
         var data := TERRAIN_DEFINITIONS[terrain_type]
@@ -119,13 +120,15 @@ func _setup_tilemap() -> void:
             atlas_source.texture = _make_tile_texture(terrain_type, data["color"], variant_index)
             atlas_source.texture_region_size = Vector2i(CELL_SIZE, CELL_SIZE)
             atlas_source.create_tile(Vector2i.ZERO)
-            var source_id := tile_set.get_next_source_id()
-            tile_set.add_source(atlas_source, source_id)
+            var source_id := generated_tile_set.get_next_source_id()
+            generated_tile_set.add_source(atlas_source, source_id)
             tile_sources[terrain_type].append(source_id)
 
-    tile_map.tile_set = tile_set
+    tile_map.tile_set = generated_tile_set
+    tile_map.set_layer_enabled(0, true)
 
 func _generate_map() -> void:
+    tile_map.clear()
     terrain_grid.resize(MAP_SIZE.x)
     for x in range(MAP_SIZE.x):
         terrain_grid[x] = []
@@ -138,6 +141,8 @@ func _generate_map() -> void:
             var variants: Array = tile_sources[terrain_type]
             var chosen_source := variants[rng.randi_range(0, variants.size() - 1)]
             tile_map.set_cell(0, Vector2i(x, y), chosen_source, Vector2i.ZERO)
+
+    tile_map.notify_runtime_tile_data_update()
 
 func _pick_terrain_for_tile(x: int, y: int) -> int:
     var height := noise.get_noise_2d(float(x), float(y))
