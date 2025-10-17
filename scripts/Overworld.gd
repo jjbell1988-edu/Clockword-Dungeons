@@ -89,7 +89,7 @@ func _snap_player_to_tile(tile: Vector2i) -> void:
     _update_character_marker(tile)
 
 func _tile_to_world(tile: Vector2i) -> Vector2:
-    var local := tile_map.map_to_local(tile)
+    var local := tile_map.map_to_local(tile) + Vector2(float(CELL_SIZE) * 0.5, float(CELL_SIZE) * 0.5)
     return tile_map.to_global(local)
 
 func _terrain_is_walkable(terrain_type: int) -> bool:
@@ -155,6 +155,7 @@ func _make_tile_texture(terrain_type: int, base_color: Color, variant_index: int
     image.fill(base_color)
     var rng_local := RandomNumberGenerator.new()
     rng_local.seed = rng.randi()
+    image.lock()
 
     match terrain_type:
         TerrainType.WATER:
@@ -233,6 +234,7 @@ func _make_tile_texture(terrain_type: int, base_color: Color, variant_index: int
                     var current := image.get_pixel(x, y)
                     image.set_pixel(x, y, current.lerp(shadow_color, 0.6))
 
+    image.unlock()
     return ImageTexture.create_from_image(image)
 
 func _create_character_marker() -> void:
@@ -252,6 +254,7 @@ func _update_character_marker(tile: Vector2i) -> void:
 func _make_character_marker_texture() -> Texture2D:
     var image := Image.create(CELL_SIZE, CELL_SIZE, false, Image.FORMAT_RGBA8)
     image.fill(Color(0, 0, 0, 0))
+    image.lock()
 
     var center := Vector2i(CELL_SIZE // 2, CELL_SIZE // 2)
     var outer_radius := CELL_SIZE // 2
@@ -268,11 +271,13 @@ func _make_character_marker_texture() -> Texture2D:
                     var tint := highlight_color if dist_sq < (outer_radius - 1) * (outer_radius - 1) else accent_color
                     image.set_pixelv(pos, tint)
 
+    image.unlock()
     return ImageTexture.create_from_image(image)
 
 func _create_player_visual() -> void:
     var image := Image.create(CELL_SIZE, CELL_SIZE, false, Image.FORMAT_RGBA8)
     image.fill(Color(0, 0, 0, 0))
+    image.lock()
 
     var center := Vector2i(CELL_SIZE // 2, CELL_SIZE // 2)
     var radius := CELL_SIZE // 3
@@ -289,6 +294,7 @@ func _create_player_visual() -> void:
                 elif dist_sq <= (radius + 1) * (radius + 1):
                     image.set_pixelv(pos, border_color)
 
+    image.unlock()
     player_sprite.texture = ImageTexture.create_from_image(image)
     player_sprite.centered = true
     player_sprite.scale = Vector2(0.5, 0.5)
